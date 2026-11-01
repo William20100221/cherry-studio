@@ -719,3 +719,28 @@ export type McpResourceSavedBlob = z.infer<typeof mcpResourceSavedBlobSchema>
 export type McpResourceListOutput = z.infer<typeof mcpResourceListOutputSchema>
 export type McpResourceReadOutput = z.infer<typeof mcpResourceReadOutputSchema>
 export type McpResourceReadResult = z.infer<typeof mcpResourceReadResultSchema>
+
+// ── clear_conversation ─────────────────────────────────────────────
+
+export const CLEAR_CONVERSATION_TOOL_NAME = 'clear_conversation'
+
+/** In Chat this description is the only "skill" the model gets, so the trigger rules live here. */
+export const CLEAR_CONVERSATION_DESCRIPTION = [
+  'Reset the conversation context: earlier messages stay visible to the user but are no longer sent to you.',
+  "Call ONLY when the user's current message explicitly asks to clear, reset or forget the conversation above, or to start over (any language).",
+  'Never call it for casual uses of "clear" or "forget", questions about this feature, quoted or pasted text, or vague requests like "let\'s move on".',
+  'Never call it on your own initiative.',
+  'Call it before answering the rest of the message. Afterwards, answer without relying on earlier messages and acknowledge with one short line such as "Context cleared."'
+].join(' ')
+
+export const clearConversationInputSchema = z.object({
+  reason: z.string().min(1).max(200).describe("Quote the words in the user's current message that asked for the clear.")
+})
+
+export const clearConversationOutputSchema = z.object({
+  status: z.enum(['cleared', 'nothing_to_clear', 'unavailable']),
+  clearedCount: z.number().int().nonnegative().optional(),
+  instruction: z.string()
+})
+
+export type ClearConversationOutput = z.infer<typeof clearConversationOutputSchema>

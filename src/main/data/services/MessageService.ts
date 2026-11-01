@@ -48,7 +48,12 @@ import {
   type TreeResponse
 } from '@shared/data/types/message'
 import type { UniqueModelId } from '@shared/data/types/model'
-import { hasClearContextPart, isBlankUserTurn, readCherryMeta } from '@shared/data/types/uiParts'
+import {
+  createClearContextPart,
+  hasClearContextPart,
+  isBlankUserTurn,
+  readCherryMeta
+} from '@shared/data/types/uiParts'
 
 import { aiUsageRecordService, mergeMessageRuntimeStats } from './AiUsageRecordService'
 import { getDataService, registerDataService } from './dataServiceRegistry'
@@ -2000,6 +2005,51 @@ export class MessageService {
    * the self-FK `ON DELETE CASCADE` removes whole subtrees, the root (excluded) survives,
    * so the single-root invariant holds — and clears `activeNodeId`.
    */
+  /**
+   * Insert a context divider directly above `messageId` and re-link the message under it, so the
+   * next history build starts at `messageId`. Undo is the existing divider toggle (delete without cascade).
+   * @returns null when nothing above the message would be excluded (first turn, or already below a divider).
+   */
+  insertContextBoundaryBefore(messageId: string): { boundary: Message; clearedCount: number } | null {
+    const result = application.get('DbService').withWriteTx((tx) => {
+      const target = this.getAddressableMessageRowTx(tx, messageId)
+      const above = target.parentId ? this.getPathRowsToNodeTx(tx, target.parentId, { topicId: target.topicId }) : []
+      const lastClear = above.findLastIndex((row) => hasClearContextPart(row.data?.parts))
+      const clearedCount = above.slice(lastClear + 1).filter((row) => row.role !== 'root').length
+      if (clearedCount === 0) return null
+
+      const createdAt = Date.now()
+      const [row] = tx
+        .insert(messageTable)
+        .values({
+          topicId: target.topicId,
+          parentId: target.parentId,
+          role: 'user',
+          data: { parts: [createClearContextPart()] },
+          status: 'success',
+          createdAt,
+          updatedAt: createdAt
+        })
+        .returning()
+        .all()
+      tx.update(messageTable).set({ parentId: row.id }).where(eq(messageTable.id, messageId)).run()
+
+      logger.info('Inserted context boundary', { boundaryId: row.id, messageId, clearedCount })
+      return { boundary: rowToMessage(row), clearedCount }
+    })
+
+    if (result) {
+      const topicId = result.boundary.topicId
+      const entityIds = [result.boundary.id, messageId]
+      notifyDataApiDataChange([
+        { endpoint: '/topics/:topicId/messages', kind: 'membership', routeParams: { topicId }, entityIds },
+        { endpoint: '/topics/:topicId/tree', routeParams: { topicId }, entityIds },
+        { endpoint: '/messages/:id', entityIds: [messageId] }
+      ])
+    }
+    return result
+  }
+
   clearTopicMessages(topicId: string): { deletedIds: string[] } {
     const result = application.get('DbService').withWriteTx((tx) => {
       this.getActiveTopicTx(tx, topicId)

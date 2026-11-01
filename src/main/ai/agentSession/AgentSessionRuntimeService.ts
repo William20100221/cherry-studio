@@ -459,6 +459,8 @@ export class AgentSessionRuntimeService extends BaseService {
   private runtimeActivity?: Disposable
   private readonly entries = new Map<string, AgentSessionRuntimeEntry>()
   private readonly closingSessions = new Map<string, { promise: Promise<void>; resumeToken?: string }>()
+  /** Sessions whose next connection must start a fresh transcript (a context divider was inserted). */
+  private readonly pendingContextResets = new Set<string>()
   /** Write-quiesce holds (backup restore). Quiesced ⇔ non-empty. Distinct from the BaseService
    *  lifecycle pause — this never touches service state. See `pause()`. */
   private readonly pauseHolds = new Set<symbol>()
@@ -1087,10 +1089,21 @@ export class AgentSessionRuntimeService extends BaseService {
       !isAgentSessionRuntimeAutonomous(entry.runtimeState)
     ) {
       this.requestRuntimeLaunch(entry, 'queued-turn')
+    } else if (this.pendingContextResets.has(entry.sessionId) && !this.isSessionBusy(entry.sessionId)) {
+      application.get('ClaudeCodeWarmQueryManager').closeAgentSessionWarm(entry.sessionId)
+      void this.closeSession(entry.sessionId)
     } else {
       this.refreshIdleTimer(entry)
       if (!this.isSessionBusy(entry.sessionId)) this._onRuntimeIdle.fire({ sessionId: entry.sessionId })
     }
+  }
+
+  /**
+   * Called by the clear_conversation tool mid-turn. The live turn keeps its transcript; the warm
+   * connection is dropped once the session goes idle, and the next connect ignores carried tokens.
+   */
+  scheduleContextReset(sessionId: string): void {
+    this.pendingContextResets.add(sessionId)
   }
 
   closeSession(sessionId: string): Promise<void> {
@@ -1837,6 +1850,8 @@ export class AgentSessionRuntimeService extends BaseService {
     const driver = runtimeDriverRegistry.getAgentSessionDriver(entry.agentType)
     if (!driver) throw new Error(`Unsupported agent runtime type: ${entry.agentType}`)
 
+    // A carried token (closing barrier, idle entry) predates the divider; the DB lookup is scoped past it.
+    if (this.pendingContextResets.delete(entry.sessionId)) entry.lastResumeToken = undefined
     this.hydrateResumeToken(entry)
     if (!this.isCurrentEntry(entry)) return false
 

@@ -25,6 +25,7 @@ import {
   SESSION_SEND_TOOL_NAME
 } from '@shared/ai/agentSessionDelivery'
 import {
+  CLEAR_CONVERSATION_TOOL_NAME,
   CONFIG_TOOL_NAME,
   CRON_TOOL_NAME,
   GENERATE_IMAGE_TOOL_NAME,
@@ -108,6 +109,8 @@ const BUILTIN_TOOL_POLICIES = {
   cherryCliInstall: tool(CHERRY_MCP_SERVER.CHERRY_TOOLS, CLI_INSTALL_TOOL_NAME, 'required'),
   cherryToMarkdown: tool(CHERRY_MCP_SERVER.CHERRY_TOOLS, TO_MARKDOWN_TOOL_NAME, 'auto'),
   cherryGenerateImage: tool(CHERRY_MCP_SERVER.CHERRY_TOOLS, GENERATE_IMAGE_TOOL_NAME, 'required'),
+  // Divider only: reversible, and the user's own message asked for it.
+  cherryClearConversation: tool(CHERRY_MCP_SERVER.CHERRY_TOOLS, CLEAR_CONVERSATION_TOOL_NAME, 'auto'),
 
   agentMemory: tool(CHERRY_MCP_SERVER.AGENT_MEMORY, 'memory', 'auto'),
   searchSkills: tool(CHERRY_MCP_SERVER.SKILLS, 'search_skills', 'auto'),

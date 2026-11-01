@@ -61,7 +61,7 @@ import {
   coerceSearchRole,
   type MessageRuntimeStatsInput
 } from '@shared/data/types/message'
-import { readCherryMeta } from '@shared/data/types/uiParts'
+import { CLEAR_CONTEXT_PART_TYPE, createClearContextPart, readCherryMeta } from '@shared/data/types/uiParts'
 
 import { AgentSessionEditError } from './AgentSessionEditError'
 import { aiUsageRecordService, mergeMessageRuntimeStats } from './AiUsageRecordService'
@@ -373,6 +373,42 @@ export class AgentSessionMessageService {
       .run()
   }
 
+  /**
+   * Append a context divider row. The runtime resume lookups ignore everything before the latest
+   * divider, so the next connection starts a fresh native transcript.
+   */
+  insertContextBoundary(sessionId: string): AgentSessionMessageEntity {
+    const database = application.get('DbService').getDb()
+    this.assertActiveSession(database, sessionId)
+    const [row] = database
+      .insert(sessionMessagesTable)
+      .values({ sessionId, role: 'user', status: 'success', data: { parts: [createClearContextPart()] } })
+      .returning()
+      .all()
+    notifyDataApiDataChange([
+      { endpoint: '/agent-sessions/:sessionId/messages', kind: 'membership', routeParams: { sessionId } }
+    ])
+    return this.rowToEntity(row)
+  }
+
+  private afterLastContextBoundary(sessionId: string): SQL | undefined {
+    const boundary = application
+      .get('DbService')
+      .getDb()
+      .select({ createdAt: sessionMessagesTable.createdAt })
+      .from(sessionMessagesTable)
+      .where(
+        and(
+          eq(sessionMessagesTable.sessionId, sessionId),
+          sql`EXISTS (SELECT 1 FROM json_each(${sessionMessagesTable.data}, '$.parts') WHERE json_extract(value, '$.type') = ${CLEAR_CONTEXT_PART_TYPE})`
+        )
+      )
+      .orderBy(desc(sessionMessagesTable.createdAt))
+      .limit(1)
+      .get()
+    return boundary ? gt(sessionMessagesTable.createdAt, boundary.createdAt) : undefined
+  }
+
   getNativeSessionId(sessionId: string): string | undefined {
     return application
       .get('DbService')
@@ -382,7 +418,8 @@ export class AgentSessionMessageService {
       .where(
         and(
           eq(sessionMessagesTable.sessionId, sessionId),
-          sql`json_type(${sessionMessagesTable.data}, '$.nativeSessionId') = 'text'`
+          sql`json_type(${sessionMessagesTable.data}, '$.nativeSessionId') = 'text'`,
+          this.afterLastContextBoundary(sessionId)
         )
       )
       .orderBy(desc(sessionMessagesTable.createdAt), desc(sessionMessagesTable.id))
@@ -961,7 +998,13 @@ export class AgentSessionMessageService {
       const result = database
         .select({ runtimeResumeToken: sessionMessagesTable.runtimeResumeToken })
         .from(sessionMessagesTable)
-        .where(and(eq(sessionMessagesTable.sessionId, sessionId), isNotNull(sessionMessagesTable.runtimeResumeToken)))
+        .where(
+          and(
+            eq(sessionMessagesTable.sessionId, sessionId),
+            isNotNull(sessionMessagesTable.runtimeResumeToken),
+            this.afterLastContextBoundary(sessionId)
+          )
+        )
         .orderBy(desc(sessionMessagesTable.createdAt))
         .limit(1)
         .all()

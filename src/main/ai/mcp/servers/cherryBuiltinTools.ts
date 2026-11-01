@@ -30,6 +30,7 @@ import { application } from '@application'
 import { loggerService } from '@logger'
 import { type CherryDocumentContext, registerDocumentTools } from '@main/ai/mcp/servers/cherryDocumentTools'
 import { modelOutputToMcpResult } from '@main/ai/mcp/toolResult'
+import { clearAgentSessionContext } from '@main/ai/tools/clearConversation'
 import { buildGenerateImageToolSchema, type GenerateImageToolInput } from '@main/ai/tools/generateImageTool'
 import {
   GENERATE_IMAGE_DESCRIPTION,
@@ -46,6 +47,9 @@ import {
   webLookupModelOutput
 } from '@main/ai/tools/webLookup'
 import {
+  CLEAR_CONVERSATION_DESCRIPTION,
+  CLEAR_CONVERSATION_TOOL_NAME,
+  clearConversationInputSchema,
   GENERATE_IMAGE_TOOL_NAME,
   REPORT_ARTIFACTS_DESCRIPTION,
   REPORT_ARTIFACTS_TOOL_NAME,
@@ -120,9 +124,21 @@ function registerBuiltinTools(server: McpServer): void {
   )
 }
 
+/** Session identity comes from the runtime-injected options, never from tool arguments. */
+function registerConversationTools(server: McpServer, { sessionId }: CherryToolsOptions): void {
+  server.registerTool(
+    CLEAR_CONVERSATION_TOOL_NAME,
+    { description: CLEAR_CONVERSATION_DESCRIPTION, inputSchema: clearConversationInputSchema },
+    async ({ reason }) => ({
+      content: [{ type: 'text', text: JSON.stringify(clearAgentSessionContext(sessionId, reason)) }]
+    })
+  )
+}
+
 export function createCherryToolsServer(options: CherryToolsOptions): McpServer {
   const server = new McpServer({ name: 'cherry-tools', version: '1.0.0' })
   registerBuiltinTools(server)
+  registerConversationTools(server, options)
   registerKnowledgeTools(server, options)
   registerAutonomyTools(server, options)
   registerCliTools(server)

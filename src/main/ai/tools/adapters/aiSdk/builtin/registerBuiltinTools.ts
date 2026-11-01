@@ -11,6 +11,7 @@
 
 import { registry, type ToolRegistry } from '../registry'
 import { createAutomationReplToolEntries } from './AutomationReplTools'
+import { createClearConversationToolEntry } from './ClearConversationTool'
 import { createFsReadToolEntry } from './FsReadTool'
 import { createKbListToolEntry } from './KnowledgeListTool'
 import { createKbManageToolEntry } from './KnowledgeManageTool'
@@ -38,4 +39,5 @@ export function registerBuiltinTools(reg: ToolRegistry = registry): void {
   reg.register(createGenerateImageToolEntry())
   reg.register(createWebFetchToolEntry())
   reg.register(createWebSearchToolEntry())
+  reg.register(createClearConversationToolEntry())
 }

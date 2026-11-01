@@ -361,7 +361,7 @@ function schemaForPartType(type: string): z.ZodTypeAny | null {
 }
 
 const KNOWLEDGE_SCOPE_PART_TYPE = 'data-knowledge-scope'
-const CLEAR_CONTEXT_PART_TYPE = 'data-clear'
+export const CLEAR_CONTEXT_PART_TYPE = 'data-clear'
 
 export type ClearContextPart = Extract<CherryMessagePart, { type: typeof CLEAR_CONTEXT_PART_TYPE }>
 

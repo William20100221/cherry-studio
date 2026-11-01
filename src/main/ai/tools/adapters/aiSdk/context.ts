@@ -19,6 +19,8 @@ export interface RequestContext {
 
   /** Absent for synthetic / IPC-driven invocations. */
   readonly topicId?: string
+  /** Assistant row this request streams into; absent for synthetic / IPC-driven invocations. */
+  readonly messageId?: string
   readonly windowId?: WindowId
   readonly model?: UniqueModelId
   readonly roots?: ReadonlyArray<{ uri: string; name?: string }>
