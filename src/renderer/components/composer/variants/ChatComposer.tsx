@@ -52,7 +52,10 @@ import { useModelById, useModels } from '@renderer/hooks/useModel'
 import { useProviders } from '@renderer/hooks/useProvider'
 import { useTopicMutations } from '@renderer/hooks/useTopic'
 import { useTopicAwaitingApproval, useTopicStreamStatus } from '@renderer/hooks/useTopicStreamStatus'
+import { ipcApi, useIpcOn } from '@renderer/ipc'
 import { EVENT_NAMES, EventEmitter } from '@renderer/services/EventService'
+import { invalidateCachedMessageUiStates } from '@renderer/services/messageUiStateCache'
+import { popup } from '@renderer/services/popup'
 import { toast } from '@renderer/services/toast'
 import { type Topic, TopicType } from '@renderer/types/topic'
 import { buildFilePartsForAttachments, withComposerFilePartMeta } from '@renderer/utils/file/buildFileParts'
@@ -65,6 +68,8 @@ import {
   resolveReasoningEffortForModel
 } from '@renderer/utils/model'
 import type { ComposerChatTarget, ComposerQueuedMessagePayload } from '@shared/ai/transport'
+import { classifyTurn } from '@shared/ai/transport'
+import type { ClearContextMode } from '@shared/data/preference/preferenceTypes'
 import type { KnowledgeBase } from '@shared/data/types/knowledge'
 import type { CherryMessagePart } from '@shared/data/types/message'
 import {
@@ -81,7 +86,7 @@ import { createComposerUserMessageParts, trimComposerDraftBoundaryBlankLines } f
 import type { InputHistoryDirection } from '../inputHistoryNavigation'
 import { QueuedFollowupsDock } from '../QueuedFollowupsDock'
 import type { ComposerDraftToken, ComposerSerializedDraft, ComposerSerializedToken } from '../tokens'
-import { type FollowupQueueItem, useFollowupQueue } from '../useFollowupQueue'
+import { type FollowupQueueAction, type FollowupQueueItem, useFollowupQueue } from '../useFollowupQueue'
 import { useInputHistory } from '../useInputHistory'
 import { ChatConversationControls, type ChatConversationControlsProps } from './chat/ChatConversationControls'
 import { type ChatComposerDraftCache, readChatDraftCache, writeChatDraftCache } from './chat/chatDraftCache'
@@ -1316,7 +1321,13 @@ const ChatComposerInner = ({
   }, [addNewTopic])
   const hasNewTopicAction = Boolean(onCreateEmptyTopic || onNewTopic)
   const newTopicDisabled = Boolean(onCreateEmptyTopic) && (isAssistantLoading || hasMissingPersistedAssistant)
+  const enqueueClearRef = useRef<((action: FollowupQueueAction) => void) | null>(null)
   const handleStartNewContext = useCallback(async () => {
+    // While a turn streams, the divider waits in the follow-up queue and runs in order.
+    if (isPending && topicId) {
+      enqueueClearRef.current?.({ kind: 'clear', mode: 'divider' })
+      return
+    }
     if (!chatWrite || clearContextDisabled) return
 
     setIsStartingNewContext(true)
@@ -1329,7 +1340,7 @@ const ChatComposerInner = ({
     } finally {
       setIsStartingNewContext(false)
     }
-  }, [actionsRef, chatWrite, clearContextDisabled, t])
+  }, [actionsRef, chatWrite, clearContextDisabled, isPending, t, topicId])
 
   const rootPanelLeadingItems = useMemo<QuickPanelListItem[]>(() => {
     const items: QuickPanelListItem[] = []
@@ -1399,7 +1410,7 @@ const ChatComposerInner = ({
               id: CHAT_CLEAR_CONTEXT_TOOL_ID,
               label: t('chat.input.new.context'),
               icon: <Eraser size={18} aria-hidden />,
-              disabled: clearContextDisabled,
+              disabled: clearContextDisabled && !isPending,
               customizePlacement: 'leading' as const,
               requiresPanel: false,
               availableWithoutModel: true,
@@ -1419,6 +1430,7 @@ const ChatComposerInner = ({
       addNewTopic,
       chatWrite,
       clearContextDisabled,
+      isPending,
       handleStartNewContext,
       hasNewTopicAction,
       mcpToolbarActive,
@@ -1438,13 +1450,13 @@ const ChatComposerInner = ({
       id: CHAT_CLEAR_CONTEXT_TOOL_ID,
       label,
       icon: <Eraser size={16} />,
-      disabled: clearContextDisabled,
+      disabled: clearContextDisabled && !isPending,
       filterText: label,
       searchAliases: getQuickPanelSearchAliases(t, 'chat.input.new.context', ['clear context']),
       action: () => void handleStartNewContext()
     })
     return items
-  }, [chatWrite, clearContextDisabled, handleStartNewContext, pinnedToolIds, t])
+  }, [chatWrite, clearContextDisabled, handleStartNewContext, isPending, pinnedToolIds, t])
   useEffect(
     () => toolsRegistry.registerLaunchers('composer-toolbar-settings', [], [customizeFooterAction]),
     [customizeFooterAction, toolsRegistry]
@@ -1476,7 +1488,7 @@ const ChatComposerInner = ({
   const isActiveTab = useIsActiveTab()
   useCommandHandler('topic.create', handleNewTopicShortcut, { enabled: isActiveTab })
   useCommandHandler('chat.context.toggle_new', () => void handleStartNewContext(), {
-    enabled: isActiveTab && Boolean(chatWrite) && !clearContextDisabled
+    enabled: isActiveTab && Boolean(chatWrite) && (isPending || !clearContextDisabled)
   })
 
   const buildQueuedPayload = useCallback(
@@ -1574,11 +1586,44 @@ const ChatComposerInner = ({
     inputHistoryToolsRef.current = null
   }, [resetHistoryIndex, setFiles, setText])
 
+  const [clearContextMode] = usePreference('chat.clear_context.default_mode')
+  const streamStatusRef = useRef(streamStatus)
+  streamStatusRef.current = streamStatus
+  /** Stop the live turn (main does it), then divider or delete. Delete always asks first. */
+  const clearConversation = useCallback(
+    async (mode: ClearContextMode, modelReason?: string): Promise<boolean> => {
+      if (!topicId) return false
+      if (mode === 'delete') {
+        const content = [
+          t('chat.input.clear.content'),
+          isPending ? t('chat.input.clear.live_hint') : null,
+          modelReason ? t('chat.input.clear.requested_by_model', { reason: modelReason }) : null
+        ]
+          .filter(Boolean)
+          .join('\n')
+        const confirmed = await popup.confirm({ title: t('chat.input.clear.title'), content, centered: true })
+        // A declined delete is settled, not failed: a queued clear item is dropped, not retried.
+        if (!confirmed) return true
+      }
+      try {
+        const { deletedIds } = await ipcApi.request('ai.conversation.clear', { topicId, mode })
+        invalidateCachedMessageUiStates(deletedIds)
+        return true
+      } catch (error) {
+        logger.warn('Failed to clear conversation', { error })
+        toast.error(t('message.error.operation_unavailable'))
+        return false
+      }
+    },
+    [isPending, t, topicId]
+  )
+
   // Queue mode: while a turn streams, follow-ups go here instead of sending; the head auto-drains
   // (normal send) when the topic goes idle, and the dock steers/edits/removes individual items.
   const {
     items: queuedFollowups,
     enqueue: enqueueFollowup,
+    enqueueAction: enqueueFollowupAction,
     sendId: sendFollowup,
     removeId: removeFollowup,
     reorder: reorderFollowups,
@@ -1590,9 +1635,33 @@ const ChatComposerInner = ({
     scopeKey: selectedKnowledgeBasesScopeKey,
     status: streamStatus,
     lastCompletedAt,
-    onDrain: sendQueuedPayload
+    onDrain: sendQueuedPayload,
+    onDrainAction: (action) => clearConversation(action.mode)
   })
   releaseFollowupEditRef.current = releaseEdit
+  enqueueClearRef.current = enqueueFollowupAction
+
+  // After Ctrl+L the status is `aborted`, which never auto-drains; kick the head once the stream settles.
+  const continueQueueAfterClear = useCallback(async () => {
+    for (let i = 0; i < 30 && classifyTurn(streamStatusRef.current).isTurnActive; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    const head = queuedFollowups[0]
+    if (head && !followupPaused) void sendFollowup(head.id)
+  }, [followupPaused, queuedFollowups, sendFollowup])
+  useCommandHandler(
+    'topic.clear_messages',
+    async () => {
+      if (await clearConversation(clearContextMode)) await continueQueueAfterClear()
+    },
+    { enabled: isActiveTab && Boolean(topicId) }
+  )
+  useIpcOn('ai.conversation.clear_requested', ({ topicId: requestedTopicId, reason }) => {
+    if (requestedTopicId !== topicId || !isActiveTab) return
+    void clearConversation('delete', reason).then((done) => {
+      if (done) void continueQueueAfterClear()
+    })
+  })
 
   const queuedFollowupModelsDataEnabled = queuedFollowups.some(
     (item) => (item.payload.mentionedModels?.length ?? 0) > 0

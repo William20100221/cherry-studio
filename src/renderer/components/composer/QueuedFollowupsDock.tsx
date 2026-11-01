@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronRight, GripVertical, Pause, Pencil, Play, X } from 'lucide-react'
+import { ArrowUp, ChevronRight, Eraser, GripVertical, Pause, Pencil, Play, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -84,8 +84,21 @@ function QueuedFollowupRow({
         <GripVertical className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
-        {previewText ? <span className="line-clamp-2 text-sm text-foreground">{previewText}</span> : null}
-        <DraftTokenChips item={item} hasText={Boolean(previewText)} />
+        {item.action ? (
+          <span className="text-muted-foreground flex items-center gap-1.5 text-sm">
+            <Eraser className="size-4 shrink-0" />
+            <span className="line-clamp-1">
+              {item.action.mode === 'delete'
+                ? t('chat.input.followup_queue.clear_item.delete')
+                : t('chat.input.followup_queue.clear_item.divider')}
+            </span>
+          </span>
+        ) : (
+          <>
+            {previewText ? <span className="line-clamp-2 text-sm text-foreground">{previewText}</span> : null}
+            <DraftTokenChips item={item} hasText={Boolean(previewText)} />
+          </>
+        )}
       </div>
       <div className="text-muted-foreground flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         <Tooltip
@@ -106,17 +119,19 @@ function QueuedFollowupRow({
             <ArrowUp className="size-4" />
           </Button>
         </Tooltip>
-        <Tooltip placement="top" content={t('chat.input.followup_queue.edit')}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="size-7 shadow-none"
-            aria-label={t('chat.input.followup_queue.edit')}
-            onClick={() => onEdit(item.id)}>
-            <Pencil className="size-4" />
-          </Button>
-        </Tooltip>
+        {!item.action && (
+          <Tooltip placement="top" content={t('chat.input.followup_queue.edit')}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 shadow-none"
+              aria-label={t('chat.input.followup_queue.edit')}
+              onClick={() => onEdit(item.id)}>
+              <Pencil className="size-4" />
+            </Button>
+          </Tooltip>
+        )}
         <Tooltip placement="top" content={t('chat.input.followup_queue.remove')}>
           <Button
             type="button"

@@ -316,6 +316,11 @@ export const aiRequestSchemas = {
     input: z.strictObject({ topicId: z.string().min(1) }),
     output: z.void()
   }),
+  /** Ctrl+L / confirmed delete: stop the live turn, then insert a divider or delete the messages. */
+  'ai.conversation.clear': defineRoute({
+    input: z.strictObject({ topicId: z.string().min(1), mode: z.enum(['divider', 'delete']) }),
+    output: z.strictObject({ deletedIds: z.array(z.string()) })
+  }),
 
   // ── Tool calls: deferred results + approval decisions. Spans two owners
   // (AiStreamManager holds the live output, AiService applies the decision) —
@@ -518,6 +523,8 @@ export const aiRequestSchemas = {
  */
 export type AiEventSchemas = {
   'ai.claude_code.binary.changed': ClaudeCodeBinaryStatus
+  /** The model asked to delete the conversation (clear_conversation, mode delete); the user must confirm. */
+  'ai.conversation.clear_requested': { topicId: string; reason: string }
   'ai.agent.attachment_selections.changed': { sessionId: string }
   'ai.stream.chunk': StreamChunkPayload
   'ai.stream.done': StreamDonePayload

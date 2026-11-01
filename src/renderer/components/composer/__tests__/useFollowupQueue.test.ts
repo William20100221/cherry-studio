@@ -1,5 +1,5 @@
 import { MockCacheUtils } from '@test-mocks/renderer/CacheService'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cacheService } from '@data/CacheService'
@@ -171,6 +171,32 @@ describe('useFollowupQueue', () => {
     expect(result.current.paused).toBe(true)
     expect(onDrain).not.toHaveBeenCalled()
     expect(result.current.items).toHaveLength(1)
+  })
+})
+
+describe('queued clear actions', () => {
+  beforeEach(() => MockCacheUtils.resetMocks())
+
+  it('runs a clear action in order without spending the completion, so the next message still drains', async () => {
+    const onDrain = vi.fn().mockResolvedValue(true)
+    const onDrainAction = vi.fn().mockResolvedValue(true)
+    const { result, rerender } = renderHook(
+      ({ status, lastCompletedAt }) =>
+        useFollowupQueue({ scopeKey: 's1', status, lastCompletedAt, onDrain, onDrainAction }),
+      { initialProps: { status: 'streaming' as const, lastCompletedAt: null as number | null } }
+    )
+    act(() => result.current.enqueueAction({ kind: 'clear', mode: 'divider' }))
+    act(() => result.current.enqueue(draft('after'), payload('after')))
+    expect(
+      result.current.takeForEdit(result.current.items[0].id, () => null),
+      'actions cannot be edited'
+    ).toBeNull()
+
+    await act(async () => rerender({ status: 'done', lastCompletedAt: 1 }))
+
+    await waitFor(() => expect(onDrainAction).toHaveBeenCalledWith({ kind: 'clear', mode: 'divider' }))
+    await waitFor(() => expect(onDrain).toHaveBeenCalledWith(payload('after')))
+    expect(result.current.items).toEqual([])
   })
 })
 

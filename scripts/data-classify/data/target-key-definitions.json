@@ -395,6 +395,20 @@
       "description": "Exponential backoff between retry attempts (v2 新增，非迁移)"
     },
     {
+      "targetKey": "chat.clear_context.default_mode",
+      "type": "PreferenceTypes.ClearContextMode",
+      "defaultValue": "divider",
+      "status": "classified",
+      "description": "What Ctrl+L and queued clears do: insert a context divider, or delete all messages (asks first)"
+    },
+    {
+      "targetKey": "chat.clear_context.model_tool_enabled",
+      "type": "boolean",
+      "defaultValue": true,
+      "status": "classified",
+      "description": "Expose the clear_conversation tool so the model can clear context when the user explicitly asks"
+    },
+    {
       "targetKey": "chat.context_settings.enabled",
       "type": "boolean",
       "defaultValue": true,

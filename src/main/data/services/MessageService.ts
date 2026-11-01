@@ -2050,6 +2050,24 @@ export class MessageService {
     return result
   }
 
+  /** Ctrl+L divider mode: a divider after the current active node, unless it already is one. */
+  appendContextBoundary(topicId: string): Message | null {
+    const topic = getDataService('TopicService').getById(topicId)
+    if (!topic.activeNodeId || hasClearContextPart(this.getById(topic.activeNodeId).data.parts)) return null
+    const boundary = this.create(topicId, {
+      parentId: topic.activeNodeId,
+      role: 'user',
+      status: 'success',
+      data: { parts: [createClearContextPart()] }
+    })
+    notifyDataApiDataChange([
+      { endpoint: '/topics/:topicId/messages', kind: 'membership', routeParams: { topicId }, entityIds: [boundary.id] },
+      { endpoint: '/topics/:topicId/tree', routeParams: { topicId }, entityIds: [boundary.id] },
+      { endpoint: '/topics/:id', routeParams: { id: topicId }, entityIds: [topicId] }
+    ])
+    return boundary
+  }
+
   clearTopicMessages(topicId: string): { deletedIds: string[] } {
     const result = application.get('DbService').withWriteTx((tx) => {
       this.getActiveTopicTx(tx, topicId)

@@ -391,6 +391,12 @@ export type CodeCliConfigs = Partial<Record<CodeCliId, CodeCliToolState>>
  */
 export type WebSearchCompressionMethod = 'none' | 'cutoff'
 
+/**
+ * What a clear-context action does.
+ * Stored in chat.clear_context.default_mode
+ */
+export type ClearContextMode = 'divider' | 'delete'
+
 // ============================================================================
 // File Processor Types
 // ============================================================================

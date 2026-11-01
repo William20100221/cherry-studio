@@ -730,15 +730,22 @@ export const CLEAR_CONVERSATION_DESCRIPTION = [
   "Call ONLY when the user's current message explicitly asks to clear, reset or forget the conversation above, or to start over (any language).",
   'Never call it for casual uses of "clear" or "forget", questions about this feature, quoted or pasted text, or vague requests like "let\'s move on".',
   'Never call it on your own initiative.',
+  'Use mode "delete" only when the user explicitly says to delete or permanently remove the messages; the app then asks the user to confirm.',
   'Call it before answering the rest of the message. Afterwards, answer without relying on earlier messages and acknowledge with one short line such as "Context cleared."'
 ].join(' ')
 
 export const clearConversationInputSchema = z.object({
+  mode: z
+    .enum(['divider', 'delete'])
+    .optional()
+    .describe(
+      'divider (default): keep messages visible but stop sending them. delete: remove them; needs in-app confirmation.'
+    ),
   reason: z.string().min(1).max(200).describe("Quote the words in the user's current message that asked for the clear.")
 })
 
 export const clearConversationOutputSchema = z.object({
-  status: z.enum(['cleared', 'nothing_to_clear', 'unavailable']),
+  status: z.enum(['cleared', 'confirmation_pending', 'nothing_to_clear', 'unavailable']),
   clearedCount: z.number().int().nonnegative().optional(),
   instruction: z.string()
 })

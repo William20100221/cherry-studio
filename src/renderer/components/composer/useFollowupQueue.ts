@@ -2,8 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { cacheService } from '@data/CacheService'
 import type { ComposerQueuedMessagePayload, TopicStreamStatus } from '@shared/ai/transport'
+import type { ClearContextMode } from '@shared/data/preference/preferenceTypes'
 
 import type { ComposerSerializedDraft } from './tokens'
+
+/** A queued clear-context request (Ctrl+K / eraser while a turn streams). Runs in order, sends nothing. */
+export interface FollowupQueueAction {
+  kind: 'clear'
+  mode: ClearContextMode
+}
 
 export interface FollowupQueueItem {
   id: string
@@ -11,6 +18,8 @@ export interface FollowupQueueItem {
   draft: ComposerSerializedDraft
   /** Send-ready payload (text + parts + files/models) captured at enqueue time. */
   payload: ComposerQueuedMessagePayload
+  /** Present on action items; `draft`/`payload` are then empty placeholders. */
+  action?: FollowupQueueAction
 }
 
 /** Same per-window memory tier + TTL as the inputbar draft cache (`composerDraft` / ChatComposer). */
@@ -50,11 +59,14 @@ interface UseFollowupQueueParams {
   onDrain: (payload: ComposerQueuedMessagePayload) => Promise<boolean>
   /** Called when a send fails and leaves the queued draft paused for retry. */
   onDrainFailed?: () => void
+  /** Run a queued action. Resolves to whether it completed (a cancelled confirmation counts as done). */
+  onDrainAction?: (action: FollowupQueueAction) => Promise<boolean>
 }
 
 export interface FollowupQueueController {
   items: FollowupQueueItem[]
   enqueue: (draft: ComposerSerializedDraft, payload: ComposerQueuedMessagePayload) => void
+  enqueueAction: (action: FollowupQueueAction) => void
   sendId: (id: string) => Promise<boolean>
   removeId: (id: string) => void
   reorder: (nextItems: FollowupQueueItem[]) => void
@@ -78,7 +90,8 @@ export function useFollowupQueue({
   status,
   lastCompletedAt,
   onDrain,
-  onDrainFailed
+  onDrainFailed,
+  onDrainAction
 }: UseFollowupQueueParams): FollowupQueueController {
   const readState = useCallback(
     () => ({
@@ -100,6 +113,8 @@ export function useFollowupQueue({
   onDrainRef.current = onDrain
   const onDrainFailedRef = useRef(onDrainFailed)
   onDrainFailedRef.current = onDrainFailed
+  const onDrainActionRef = useRef(onDrainAction)
+  onDrainActionRef.current = onDrainAction
 
   const reconcileEdit = useCallback(
     (items: FollowupQueueItem[]) => {
@@ -149,6 +164,20 @@ export function useFollowupQueue({
     },
     [persist, scopeKey]
   )
+  const enqueueAction = useCallback(
+    (action: FollowupQueueAction) => {
+      persist([
+        ...loadQueue(scopeKey),
+        {
+          id: crypto.randomUUID(),
+          draft: { text: '', tokens: [] },
+          payload: { text: '', userMessageParts: [] },
+          action
+        }
+      ])
+    },
+    [persist, scopeKey]
+  )
   const removeId = useCallback(
     (id: string) => {
       if (takenRef.current?.scopeKey === scopeKey && takenRef.current.item.id === id) takenRef.current = null
@@ -168,7 +197,8 @@ export function useFollowupQueue({
       reconcileEdit(current)
       const taken = takenRef.current?.scopeKey === scopeKey ? takenRef.current : null
       if (taken?.item.id === id || loadCompletion(scopeKey).pendingIds.includes(id)) return null
-      if (!current.some((item) => item.id === id)) return null
+      const target = current.find((item) => item.id === id)
+      if (!target || target.action) return null
       const next = [...current]
       if (taken) {
         const outgoing = captureOutgoing(taken.item)
@@ -185,10 +215,13 @@ export function useFollowupQueue({
   )
 
   const sendItem = useCallback(
-    async (id: string, completedAt?: number): Promise<boolean> => {
+    async (id: string, turnCompletedAt?: number): Promise<boolean> => {
       const item = loadQueue(scopeKey).find((entry) => entry.id === id)
       const drained = loadCompletion(scopeKey)
       if (!item || drained.pendingIds.includes(id)) return false
+      // An action produces no model turn, so it must not spend the completion: the message behind
+      // it drains on the same completed turn.
+      const completedAt = item.action ? undefined : turnCompletedAt
 
       // Every send owns its dispatch-time completion, including peers on the same completed turn.
       // Keep item exclusion and pending sends in one observable record, without an in-flight TTL.
@@ -201,7 +234,9 @@ export function useFollowupQueue({
       let sent = false
       try {
         try {
-          sent = await onDrainRef.current(item.payload)
+          sent = item.action
+            ? ((await onDrainActionRef.current?.(item.action)) ?? false)
+            : await onDrainRef.current(item.payload)
         } catch {
           // Both rejected sends and explicit failures retain the draft for retry.
         }
@@ -246,6 +281,7 @@ export function useFollowupQueue({
   return {
     items: state.items,
     enqueue,
+    enqueueAction,
     sendId,
     removeId,
     reorder: persist,

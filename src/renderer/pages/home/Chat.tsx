@@ -19,20 +19,15 @@ import {
 } from '@renderer/components/composer/variants/chat/ChatConversationControls'
 import type { ChatConversationControlsSnapshot } from '@renderer/components/composer/variants/ChatComposer'
 import PromptPopup from '@renderer/components/popups/PromptPopup'
-import { useClearTopicMessages } from '@renderer/hooks/chat/useClearTopicMessages'
 import { useCommandHandler } from '@renderer/hooks/command'
-import { useIsActiveTab } from '@renderer/hooks/tab'
 import { useAssistant } from '@renderer/hooks/useAssistant'
 import { useProviders } from '@renderer/hooks/useProvider'
 import { useTopicMutations } from '@renderer/hooks/useTopic'
 import { topicBrowserRuntimeService } from '@renderer/services/AgentBrowserRuntimeService'
 import { EVENT_NAMES, EventEmitter } from '@renderer/services/EventService'
-import { popup } from '@renderer/services/popup'
-import { toast } from '@renderer/services/toast'
 import type { ConversationCenterSlot, PaneManualToggleSignal } from '@renderer/types/conversationLayout'
 import type { Citation } from '@renderer/types/message'
 import type { Topic } from '@renderer/types/topic'
-import { formatErrorMessageWithPrefix } from '@renderer/utils/error'
 
 import ChatContent from './ChatContent'
 import ChatNavbar from './components/ChatNavbar'
@@ -84,7 +79,6 @@ interface CitationPanelState {
 
 const Chat: FC<Props> = (props) => {
   const { updateTopic: patchTopic } = useTopicMutations()
-  const clearTopicMessages = useClearTopicMessages()
   const { t } = useTranslation()
   const [messageStyle] = usePreference('chat.message.style')
   const [topicDisplayMode] = usePreference('topic.tab.display_mode')
@@ -98,7 +92,6 @@ const Chat: FC<Props> = (props) => {
   const activeTopic = props.activeTopic
   const centerSurface = props.centerSurface
   const showConversation = Boolean(activeTopic && !centerSurface)
-  const isActiveTab = useIsActiveTab()
   const showConversationChrome = !centerSurface
   const activeTopicId = activeTopic?.id
   const citationPanelCitations =
@@ -163,25 +156,6 @@ const Chat: FC<Props> = (props) => {
       }
     },
     { enabled: showConversation }
-  )
-  useCommandHandler(
-    'topic.clear_messages',
-    async () => {
-      if (!activeTopic) return
-      const confirmed = await popup.confirm({
-        title: t('chat.input.clear.title'),
-        content: t('chat.input.clear.content'),
-        autoFocusConfirm: true,
-        centered: true
-      })
-      if (!confirmed) return
-      try {
-        await clearTopicMessages(activeTopic.id)
-      } catch (error) {
-        toast.error(formatErrorMessageWithPrefix(error, t('message.error.unknown')))
-      }
-    },
-    { enabled: showConversation && isActiveTab }
   )
 
   const citationsPanelOpen = citationPanelCitations !== null

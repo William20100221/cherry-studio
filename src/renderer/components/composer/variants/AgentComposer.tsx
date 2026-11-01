@@ -64,8 +64,10 @@ import { useKnowledgeBases } from '@renderer/hooks/useKnowledgeBase'
 import { useAvailableSkills } from '@renderer/hooks/useSkills'
 import { useTimer } from '@renderer/hooks/useTimer'
 import { useTopicStreamStatus } from '@renderer/hooks/useTopicStreamStatus'
-import { ipcApi } from '@renderer/ipc'
+import { ipcApi, useIpcOn } from '@renderer/ipc'
 import { EVENT_NAMES, EventEmitter } from '@renderer/services/EventService'
+import { invalidateCachedMessageUiStates } from '@renderer/services/messageUiStateCache'
+import { popup } from '@renderer/services/popup'
 import { toast } from '@renderer/services/toast'
 import type { ThinkingOption } from '@renderer/types/reasoning'
 import { TopicType } from '@renderer/types/topic'
@@ -80,6 +82,8 @@ import {
 import type { ComposerAttachment } from '@renderer/utils/message/composerAttachment'
 import { resolveReasoningEffortForModel } from '@renderer/utils/model'
 import type { ComposerQueuedMessagePayload } from '@shared/ai/transport'
+import { classifyTurn } from '@shared/ai/transport'
+import type { ClearContextMode } from '@shared/data/preference/preferenceTypes'
 import type { AgentEntity } from '@shared/data/types/agent'
 import type { KnowledgeBase } from '@shared/data/types/knowledge'
 import type { CherryMessagePart, FileUIPart } from '@shared/data/types/message'
@@ -1603,9 +1607,61 @@ const AgentComposerInner = ({
     scopeKey: launchOptions?.editing ? `${sessionTopicId}:edit:${launchOptions.editing.messageId}` : sessionTopicId,
     status: sendDisabled || launchOptions?.editing ? undefined : sessionStatus,
     lastCompletedAt,
-    onDrain: sendQueuedPayload
+    onDrain: sendQueuedPayload,
+    onDrainAction: (action) => clearConversation(action.mode)
   })
   releaseFollowupEditRef.current = releaseEdit
+
+  const [clearContextMode] = usePreference('chat.clear_context.default_mode')
+  const isActiveTab = useIsActiveTab()
+  const sessionStatusRef = useRef(sessionStatus)
+  sessionStatusRef.current = sessionStatus
+  /** Stop the live turn (main does it), then divider or delete. Delete always asks first. */
+  const clearConversation = useCallback(
+    async (mode: ClearContextMode, modelReason?: string): Promise<boolean> => {
+      if (mode === 'delete') {
+        const content = [
+          t('chat.input.clear.content'),
+          isStreaming ? t('chat.input.clear.live_hint') : null,
+          modelReason ? t('chat.input.clear.requested_by_model', { reason: modelReason }) : null
+        ]
+          .filter(Boolean)
+          .join('\n')
+        const confirmed = await popup.confirm({ title: t('chat.input.clear.title'), content, centered: true })
+        if (!confirmed) return true
+      }
+      try {
+        const { deletedIds } = await ipcApi.request('ai.conversation.clear', { topicId: sessionTopicId, mode })
+        invalidateCachedMessageUiStates(deletedIds)
+        return true
+      } catch (error) {
+        logger.warn('Failed to clear conversation', { error })
+        toast.error(t('message.error.operation_unavailable'))
+        return false
+      }
+    },
+    [isStreaming, sessionTopicId, t]
+  )
+  const continueQueueAfterClear = useCallback(async () => {
+    for (let i = 0; i < 30 && classifyTurn(sessionStatusRef.current).isTurnActive; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    const head = queuedFollowups[0]
+    if (head && !followupPaused) void sendFollowup(head.id)
+  }, [followupPaused, queuedFollowups, sendFollowup])
+  useCommandHandler(
+    'topic.clear_messages',
+    async () => {
+      if (await clearConversation(clearContextMode)) await continueQueueAfterClear()
+    },
+    { enabled: isActiveTab && !sendDisabled && !launchOptions?.editing }
+  )
+  useIpcOn('ai.conversation.clear_requested', ({ topicId, reason }) => {
+    if (topicId !== sessionTopicId || !isActiveTab) return
+    void clearConversation('delete', reason).then((done) => {
+      if (done) void continueQueueAfterClear()
+    })
+  })
 
   useEffect(() => {
     if (launchOptions?.editing) return

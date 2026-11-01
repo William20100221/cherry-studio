@@ -8,6 +8,11 @@ import {
   InputGroupInputNumber,
   InputGroupText,
   InputNumber,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Switch
 } from '@cherrystudio/ui'
 import { usePreference } from '@data/hooks/usePreference'
@@ -59,6 +64,8 @@ export const ContextManagementSettings = () => {
   const [compressEnabled, setCompressEnabled] = usePreference('chat.context_settings.compress.enabled')
   const [compressModelId, setCompressModelId] = usePreference('chat.context_settings.compress.model_id')
   const [compressThreshold, setCompressThreshold] = usePreference('chat.context_settings.compress.threshold_percent')
+  const [clearMode, setClearMode] = usePreference('chat.clear_context.default_mode')
+  const [modelToolEnabled, setModelToolEnabled] = usePreference('chat.clear_context.model_tool_enabled')
 
   const { model: compressModel } = useModelById(compressModelId as UniqueModelId | null)
   const { providers } = useProviders({ enabled: true })
@@ -96,6 +103,40 @@ export const ContextManagementSettings = () => {
             onBlur={(value) => void setMaxMessages(value === null ? null : Math.floor(value))}
           />
         </div>
+      </SettingRow>
+      <SettingDivider />
+      <SettingRow>
+        <div className="min-w-0 flex-1">
+          <SettingRowTitleWithTooltip
+            title={t('settings.models.context_management.clear_mode')}
+            description={t('settings.models.context_management.clear_mode_description')}
+          />
+        </div>
+        <div className="w-[220px] shrink-0">
+          <Select value={clearMode} onValueChange={(value) => void setClearMode(value as typeof clearMode)}>
+            <SelectTrigger className="h-8 w-full" aria-label={t('settings.models.context_management.clear_mode')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="divider">{t('settings.models.context_management.clear_mode_divider')}</SelectItem>
+              <SelectItem value="delete">{t('settings.models.context_management.clear_mode_delete')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </SettingRow>
+      <SettingDivider />
+      <SettingRow>
+        <div className="min-w-0 flex-1">
+          <SettingRowTitleWithTooltip
+            title={t('settings.models.context_management.model_tool')}
+            description={t('settings.models.context_management.model_tool_description')}
+          />
+        </div>
+        <Switch
+          checked={modelToolEnabled}
+          onCheckedChange={setModelToolEnabled}
+          aria-label={t('settings.models.context_management.model_tool')}
+        />
       </SettingRow>
       <SettingDivider />
       <SettingRow id="setting-general-context-enabled" className="scroll-mt-6">

@@ -11,6 +11,7 @@ import { MessageEditingProvider, useMessageEditing } from '@renderer/components/
 import type * as ModelSpeedControlModule from '@renderer/components/ModelSpeedControl'
 import { QuickPanelProvider } from '@renderer/components/QuickPanel'
 import type * as UseProviderModule from '@renderer/hooks/useProvider'
+import { popup } from '@renderer/services/popup'
 import { toast } from '@renderer/services/toast'
 import { voiceTargetManager } from '@renderer/services/voice'
 import type { KnowledgeBase } from '@shared/data/types/knowledge'
@@ -41,7 +42,7 @@ const mocks = vi.hoisted(() => ({
   toggleExpanded: vi.fn(),
   getDraft: vi.fn(),
   reconcileTokens: vi.fn(),
-  commandHandlers: new Map<string, () => void>(),
+  commandHandlers: new Map<string, () => unknown>(),
   commandOptions: new Map<string, { enabled?: boolean }>(),
   eventListeners: new Map<string, (payload: unknown) => void>(),
   eventEmit: vi.fn(),
@@ -58,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   selectedModel: undefined as Model | undefined,
   modelSelectorProps: [] as any[],
   topicPending: false,
+  clearContextMode: 'divider' as 'divider' | 'delete',
   awaitingApproval: false,
   surfaceProps: undefined as ComposerSurfaceProps | undefined,
   realSurface: undefined as ComponentType<ComposerSurfaceProps> | undefined,
@@ -506,6 +508,7 @@ vi.mock('@renderer/data/hooks/usePreference', () => ({
       'chat.narrow_mode': false,
       'chat.input.send_message_shortcut': 'Enter',
       'chat.input.toolbar.pinned_tools': mocks.pinnedToolIds,
+      'chat.clear_context.default_mode': mocks.clearContextMode,
       'topic.tab.display_mode': mocks.topicLayout === 'classic' ? 'assistant' : 'time'
     }
     return [values[key]]
@@ -798,6 +801,7 @@ describe('ChatComposer', () => {
     mocks.modelSelectorProps = []
     mocks.topicPending = false
     mocks.awaitingApproval = false
+    mocks.clearContextMode = 'divider'
     mocks.surfaceProps = undefined
     mocks.realSurface = undefined
     mocks.derivedToolState = undefined
@@ -1432,15 +1436,32 @@ describe('ChatComposer', () => {
     expect(toast.error).not.toHaveBeenCalledWith('code.model_required')
   })
 
-  it.each([
-    ['streaming', true, false],
-    ['awaiting approval', false, true]
-  ])('disables clear context while %s', (_label, pending, awaitingApproval) => {
+  it('queues a divider while streaming instead of clearing at once', async () => {
     const startNewContext = vi.fn().mockResolvedValue(undefined)
     mocks.chatWrite = { pause: vi.fn(), startNewContext }
     mocks.pinnedToolIds = ['composer:clear-context']
-    mocks.topicPending = pending
-    mocks.awaitingApproval = awaitingApproval
+    mocks.topicPending = true
+
+    render(<ChatComposer topic={topic} onSend={vi.fn()} />)
+
+    const clearContextButton = within(screen.getByTestId('composer-left-controls')).getByRole('button', {
+      name: 'chat.input.new.context'
+    })
+    expect(clearContextButton).toBeEnabled()
+    expect(mocks.commandOptions.get('chat.context.toggle_new')).toEqual({ enabled: true })
+
+    fireEvent.click(clearContextButton)
+    expect(startNewContext).not.toHaveBeenCalled()
+    await waitFor(() => expect(mocks.surfaceProps?.queueContent).toBeTruthy())
+    const queueContent = mocks.surfaceProps?.queueContent as any
+    expect(queueContent.props.items[0].action).toEqual({ kind: 'clear', mode: 'divider' })
+  })
+
+  it('disables clear context while awaiting approval', () => {
+    const startNewContext = vi.fn().mockResolvedValue(undefined)
+    mocks.chatWrite = { pause: vi.fn(), startNewContext }
+    mocks.pinnedToolIds = ['composer:clear-context']
+    mocks.awaitingApproval = true
 
     render(<ChatComposer topic={topic} onSend={vi.fn()} />)
 
@@ -1452,6 +1473,54 @@ describe('ChatComposer', () => {
 
     fireEvent.click(clearContextButton)
     expect(startNewContext).not.toHaveBeenCalled()
+  })
+
+  it('Ctrl+L clears through main without asking in divider mode, then continues the queue', async () => {
+    mocks.topicPending = true
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    render(<ChatComposer topic={topic} onSend={onSend} />)
+    await act(async () => {
+      await mocks.surfaceProps?.onSendDraft({ text: 'later', tokens: [] })
+    })
+    expect(onSend).not.toHaveBeenCalled()
+    ipcRequestMock.mockResolvedValueOnce({ deletedIds: [] })
+
+    await act(async () => {
+      await mocks.commandHandlers.get('topic.clear_messages')?.()
+    })
+
+    expect(popup.confirm).not.toHaveBeenCalled()
+    expect(ipcRequestMock).toHaveBeenCalledWith('ai.conversation.clear', { topicId: topic.id, mode: 'divider' })
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('later', expect.anything()))
+  })
+
+  it('Ctrl+L in delete mode asks first and does nothing when declined', async () => {
+    mocks.clearContextMode = 'delete'
+    vi.mocked(popup.confirm).mockResolvedValueOnce(false)
+    render(<ChatComposer topic={topic} onSend={vi.fn()} />)
+
+    await act(async () => {
+      await mocks.commandHandlers.get('topic.clear_messages')?.()
+    })
+
+    expect(popup.confirm).toHaveBeenCalledOnce()
+    expect(ipcRequestMock).not.toHaveBeenCalledWith('ai.conversation.clear', expect.anything())
+  })
+
+  it('asks before a delete the model requested, quoting its reason', async () => {
+    ipcRequestMock.mockResolvedValueOnce({ deletedIds: ['m1'] })
+    render(<ChatComposer topic={topic} onSend={vi.fn()} />)
+
+    await act(async () => {
+      mocks.eventListeners.get('ai.conversation.clear_requested')?.({ topicId: topic.id, reason: 'wipe it' })
+    })
+
+    await waitFor(() =>
+      expect(ipcRequestMock).toHaveBeenCalledWith('ai.conversation.clear', { topicId: topic.id, mode: 'delete' })
+    )
+    expect(popup.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('chat.input.clear.requested_by_model') })
+    )
   })
 
   it('reflects a clear-context operation started outside the composer', () => {
@@ -1494,7 +1563,7 @@ describe('ChatComposer', () => {
 
     render(<ChatComposer topic={topic} onSend={vi.fn()} />)
 
-    act(() => mocks.commandHandlers.get('chat.context.toggle_new')?.())
+    act(() => void mocks.commandHandlers.get('chat.context.toggle_new')?.())
 
     await waitFor(() => expect(startNewContext).toHaveBeenCalledOnce())
     expect(mocks.focusComposer).toHaveBeenCalledWith('end')

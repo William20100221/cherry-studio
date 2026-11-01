@@ -373,6 +373,29 @@ export class AgentSessionMessageService {
       .run()
   }
 
+  /** Delete every row of a session (Ctrl+L delete mode). Caller must have stopped the runtime first. */
+  clearSessionMessages(sessionId: string): { deletedIds: string[] } {
+    const database = application.get('DbService').getDb()
+    this.assertActiveSession(database, sessionId)
+    const deletedIds = application.get('DbService').withWriteTx((tx) => {
+      const ids = tx
+        .select({ id: sessionMessagesTable.id })
+        .from(sessionMessagesTable)
+        .where(eq(sessionMessagesTable.sessionId, sessionId))
+        .all()
+        .map((row) => row.id)
+      for (const id of ids) this.deleteSessionMessageTx(tx, sessionId, id)
+      return ids
+    })
+    if (deletedIds.length > 0) {
+      notifyDataApiDataChange([
+        { endpoint: '/agent-sessions/:sessionId/messages', kind: 'membership', routeParams: { sessionId } }
+      ])
+    }
+    logger.info('Cleared agent session messages', { sessionId, count: deletedIds.length })
+    return { deletedIds }
+  }
+
   /**
    * Append a context divider row. The runtime resume lookups ignore everything before the latest
    * divider, so the next connection starts a fresh native transcript.

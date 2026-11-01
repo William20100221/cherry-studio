@@ -20,10 +20,19 @@ vi.mock('@data/hooks/usePreference', () => ({
 vi.mock('@cherrystudio/ui', async (importOriginal) => ({
   ...(await importOriginal<typeof CherryStudioUi>()),
   Divider: () => <hr />,
-  Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (checked: boolean) => void }) => (
+  Switch: ({
+    checked,
+    onCheckedChange,
+    'aria-label': ariaLabel
+  }: {
+    checked: boolean
+    onCheckedChange: (checked: boolean) => void
+    'aria-label'?: string
+  }) => (
     <input
       type="checkbox"
       role="switch"
+      aria-label={ariaLabel}
       checked={!!checked}
       onChange={(event) => onCheckedChange(event.currentTarget.checked)}
     />
@@ -52,7 +61,9 @@ describe('ContextManagementSettings', () => {
       'chat.context_settings.truncate_threshold': 50_000,
       'chat.context_settings.compress.enabled': true,
       'chat.context_settings.compress.model_id': null,
-      'chat.context_settings.compress.threshold_percent': 80
+      'chat.context_settings.compress.threshold_percent': 80,
+      'chat.clear_context.default_mode': 'divider',
+      'chat.clear_context.model_tool_enabled': true
     }
   })
 
@@ -60,7 +71,7 @@ describe('ContextManagementSettings', () => {
     prefs.state['chat.context_settings.enabled'] = false
     render(<ContextManagementSettings />)
     expect(screen.getByText('settings.models.context_management.scope_description')).toBeInTheDocument()
-    expect(screen.getAllByRole('switch')).toHaveLength(1)
+    expect(screen.getAllByRole('switch')).toHaveLength(2)
     expect(screen.queryByLabelText('settings.models.context_management.truncate_threshold')).not.toBeInTheDocument()
     expect(screen.queryByTestId('compress-model-selector')).not.toBeInTheDocument()
     // Scope is not governed by the master switch, so it stays reachable.
@@ -103,8 +114,16 @@ describe('ContextManagementSettings', () => {
   it('writes the master switch preference', () => {
     prefs.state['chat.context_settings.enabled'] = false
     render(<ContextManagementSettings />)
-    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByRole('switch', { name: 'settings.models.context_management.enabled' }))
     expect(prefs.setters['chat.context_settings.enabled']).toHaveBeenCalledWith(true)
+  })
+
+  it('writes the clear-context preferences', () => {
+    render(<ContextManagementSettings />)
+    expect(screen.getByLabelText('settings.models.context_management.clear_mode')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('switch', { name: 'settings.models.context_management.model_tool' }))
+    expect(prefs.setters['chat.clear_context.model_tool_enabled']).toHaveBeenCalledWith(false)
   })
 
   it('floors the threshold and clamps it to the fs_read-safe minimum', () => {

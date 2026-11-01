@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as ChatLayoutModeContextModule from '@renderer/components/chat/layout/ChatLayoutModeContext'
 import type * as PaneShellModule from '@renderer/components/chat/panes/Shell'
-import { popup } from '@renderer/services/popup'
 import type { Topic } from '@renderer/types/topic'
 
 import Chat from '../Chat'
@@ -22,7 +21,6 @@ const assistantContextMock = vi.hoisted(() => ({
 }))
 const commandHandlers = vi.hoisted(() => new Map<string, () => void | Promise<void>>())
 const eventEmitMock = vi.hoisted(() => vi.fn())
-const clearTopicMessagesMock = vi.hoisted(() => vi.fn(async () => undefined))
 const activeTabMock = vi.hoisted(() => ({ current: true }))
 const citationBrowserMocks = vi.hoisted(() => ({ ensure: vi.fn(), tryOpen: vi.fn() }))
 
@@ -144,10 +142,6 @@ vi.mock('@renderer/hooks/tab', () => ({
   useIsActiveTab: () => activeTabMock.current
 }))
 
-vi.mock('@renderer/hooks/chat/useClearTopicMessages', () => ({
-  useClearTopicMessages: () => clearTopicMessagesMock
-}))
-
 vi.mock('@renderer/services/EventService', () => ({
   EVENT_NAMES: {
     FOCUS_CHAT_COMPOSER: 'focus-chat-composer'
@@ -235,17 +229,6 @@ describe('Chat', () => {
     activeTabMock.current = true
   })
 
-  it('clears the active topic once the confirmation is accepted', async () => {
-    render(<Chat activeTopic={topic} />)
-
-    await act(async () => {
-      await commandHandlers.get('topic.clear_messages')?.()
-    })
-
-    expect(popup.confirm).toHaveBeenCalled()
-    expect(clearTopicMessagesMock).toHaveBeenCalledWith(topic.id)
-  })
-
   it('opens citations in the active topic browser and closes the citation panel', () => {
     render(<Chat activeTopic={topic} />)
     act(() => {
@@ -261,26 +244,6 @@ describe('Chat', () => {
     expect(citationBrowserMocks.ensure).toHaveBeenCalledExactlyOnceWith(topic.id, 'https://example.com/reference')
     expect(citationBrowserMocks.tryOpen).toHaveBeenCalledExactlyOnceWith('browser', { userInitiated: true })
     expect(conversationShellProps.current.sidePanel.props.children.props.open).toBe(false)
-  })
-
-  it('leaves the topic untouched when the confirmation is dismissed', async () => {
-    vi.mocked(popup.confirm).mockResolvedValueOnce(false)
-
-    render(<Chat activeTopic={topic} />)
-
-    await act(async () => {
-      await commandHandlers.get('topic.clear_messages')?.()
-    })
-
-    expect(clearTopicMessagesMock).not.toHaveBeenCalled()
-  })
-
-  it('does not register the clear-messages command for a background tab', () => {
-    activeTabMock.current = false
-
-    render(<Chat activeTopic={topic} />)
-
-    expect(commandHandlers.has('topic.clear_messages')).toBe(false)
   })
 
   it('renders the navbar and right pane shortcuts in the shared conversation shell', () => {
