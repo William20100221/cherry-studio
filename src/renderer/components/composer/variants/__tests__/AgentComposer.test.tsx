@@ -1306,6 +1306,45 @@ describe('AgentComposer', () => {
     expect(toast.error).toHaveBeenCalledWith('code.model_required')
   })
 
+  it('Ctrl+K while streaming queues a clear item instead of clearing at once', () => {
+    render(
+      <AgentComposer
+        agentId="agent-1"
+        sessionId="session-1"
+        sendMessage={mocks.sendMessage}
+        stop={mocks.stop}
+        isStreaming
+      />
+    )
+
+    act(() => mocks.shortcutHandlers.get('chat.context.toggle_new')?.())
+
+    expect(getQueueDock().props.items[0].action).toEqual({ kind: 'clear', mode: 'divider' })
+    expect(mocks.ipcApiRequest).not.toHaveBeenCalledWith('ai.conversation.clear', expect.anything())
+  })
+
+  it('Ctrl+K while idle inserts a divider through main', async () => {
+    mocks.ipcApiRequest.mockResolvedValueOnce({ deletedIds: [] })
+    render(
+      <AgentComposer
+        agentId="agent-1"
+        sessionId="session-1"
+        sendMessage={mocks.sendMessage}
+        stop={mocks.stop}
+        isStreaming={false}
+      />
+    )
+
+    await act(async () => {
+      mocks.shortcutHandlers.get('chat.context.toggle_new')?.()
+    })
+
+    expect(mocks.ipcApiRequest).toHaveBeenCalledWith('ai.conversation.clear', {
+      topicId: 'agent-session:session-1',
+      mode: 'divider'
+    })
+  })
+
   it('sends directly via the steer option while streaming, bypassing the queue', async () => {
     render(
       <AgentComposer

@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cacheService } from '@data/CacheService'
+import type { TopicStreamStatus } from '@shared/ai/transport'
 
 const { useFollowupQueue } = await import('../useFollowupQueue')
 
@@ -183,7 +184,7 @@ describe('queued clear actions', () => {
     const { result, rerender } = renderHook(
       ({ status, lastCompletedAt }) =>
         useFollowupQueue({ scopeKey: 's1', status, lastCompletedAt, onDrain, onDrainAction }),
-      { initialProps: { status: 'streaming' as const, lastCompletedAt: null as number | null } }
+      { initialProps: { status: 'streaming' as TopicStreamStatus, lastCompletedAt: null as number | null } }
     )
     act(() => result.current.enqueueAction({ kind: 'clear', mode: 'divider' }))
     act(() => result.current.enqueue(draft('after'), payload('after')))

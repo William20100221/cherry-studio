@@ -61,7 +61,12 @@ import {
   coerceSearchRole,
   type MessageRuntimeStatsInput
 } from '@shared/data/types/message'
-import { CLEAR_CONTEXT_PART_TYPE, createClearContextPart, readCherryMeta } from '@shared/data/types/uiParts'
+import {
+  CLEAR_CONTEXT_PART_TYPE,
+  createClearContextPart,
+  hasClearContextPart,
+  readCherryMeta
+} from '@shared/data/types/uiParts'
 
 import { AgentSessionEditError } from './AgentSessionEditError'
 import { aiUsageRecordService, mergeMessageRuntimeStats } from './AiUsageRecordService'
@@ -403,6 +408,15 @@ export class AgentSessionMessageService {
   insertContextBoundary(sessionId: string): AgentSessionMessageEntity {
     const database = application.get('DbService').getDb()
     this.assertActiveSession(database, sessionId)
+    const newest = database
+      .select()
+      .from(sessionMessagesTable)
+      .where(eq(sessionMessagesTable.sessionId, sessionId))
+      .orderBy(desc(sessionMessagesTable.createdAt), desc(sessionMessagesTable.id))
+      .limit(1)
+      .get()
+    // Pressing clear twice must not stack dividers.
+    if (newest && hasClearContextPart(newest.data.parts)) return this.rowToEntity(newest)
     const [row] = database
       .insert(sessionMessagesTable)
       .values({ sessionId, role: 'user', status: 'success', data: { parts: [createClearContextPart()] } })

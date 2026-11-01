@@ -1,4 +1,4 @@
-import { ScanLine, Settings2, Terminal, ToolCase } from 'lucide-react'
+import { Eraser, ScanLine, Settings2, Terminal, ToolCase } from 'lucide-react'
 import React, { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -160,6 +160,7 @@ const AGENT_MANAGED_TOKEN_KINDS_BEFORE_KNOWLEDGE_RESTORE = [
 ] as const satisfies readonly ComposerDraftToken['kind'][]
 const AGENT_SKILLS_LAUNCHER_ID = 'agent-skills'
 const AGENT_NEW_SESSION_TOOL_ID = 'composer:new-session'
+const AGENT_CLEAR_CONTEXT_TOOL_ID = 'composer:clear-context'
 const EMPTY_ACCESSIBLE_PATHS: readonly AbsoluteFilePath[] = []
 const FILE_IPC_BATCH_SIZE = 500
 
@@ -1596,6 +1597,7 @@ const AgentComposerInner = ({
   const {
     items: queuedFollowups,
     enqueue: enqueueFollowup,
+    enqueueAction: enqueueFollowupAction,
     sendId: sendFollowup,
     removeId: removeFollowup,
     reorder: reorderFollowups,
@@ -1661,6 +1663,31 @@ const AgentComposerInner = ({
     void clearConversation('delete', reason).then((done) => {
       if (done) void continueQueueAfterClear()
     })
+  })
+  useIpcOn('ai.conversation.cleared', ({ topicId: clearedTopicId, boundaryMessageId }) => {
+    if (clearedTopicId !== sessionTopicId || !isActiveTab) return
+    toast.info({
+      title: t('chat.message.context_cleared.toast'),
+      timeout: 10_000,
+      action: {
+        label: t('chat.message.context_cleared.undo'),
+        onClick: () =>
+          ipcApi
+            .request('ai.conversation.undo_clear', { topicId: clearedTopicId, boundaryMessageId })
+            .catch((error) => logger.warn('Failed to undo clear', { error }))
+      }
+    })
+  })
+  /** Ctrl+K / eraser: divider now, or queued behind the streaming reply. Undo comes from the toast. */
+  const handleStartNewContext = useCallback(() => {
+    if (isStreaming) {
+      enqueueFollowupAction({ kind: 'clear', mode: 'divider' })
+      return
+    }
+    void clearConversation('divider')
+  }, [clearConversation, enqueueFollowupAction, isStreaming])
+  useCommandHandler('chat.context.toggle_new', handleStartNewContext, {
+    enabled: isActiveTab && !sendDisabled && !launchOptions?.editing
   })
 
   useEffect(() => {
@@ -1774,6 +1801,7 @@ const AgentComposerInner = ({
   const mcpToolbarActive = isMcpToolbarActive({ scope: TopicType.Session, agent })
   const toolbarCustomTools = useMemo<ComposerToolbarCustomTool[]>(() => {
     const newSessionLabel = t('agent.session.new')
+    const clearContextLabel = t('chat.input.new.context')
     const skillLabel = t('plugins.skills')
     const slashCommandsLabel = t('chat.input.slash_commands.title')
     return [
@@ -1802,6 +1830,13 @@ const AgentComposerInner = ({
           ]
         : []),
       {
+        id: AGENT_CLEAR_CONTEXT_TOOL_ID,
+        label: clearContextLabel,
+        icon: <Eraser size={18} aria-hidden />,
+        requiresPanel: false,
+        onSelect: () => handleStartNewContext()
+      },
+      {
         id: 'skills',
         label: skillLabel,
         icon: <ToolCase size={18} aria-hidden />,
@@ -1823,7 +1858,15 @@ const AgentComposerInner = ({
           unifiedPanelControl?.open({ launcherId: ComposerPanelSymbol.McpStatus, searchText: 'MCP' })
       }
     ]
-  }, [handleCreateEmptySession, hasNewSessionAction, mcpToolbarActive, screenshotEnabled, startScreenshot, t])
+  }, [
+    handleCreateEmptySession,
+    handleStartNewContext,
+    hasNewSessionAction,
+    mcpToolbarActive,
+    screenshotEnabled,
+    startScreenshot,
+    t
+  ])
 
   const renderQuickPanelShortcuts = useCallback(
     ({

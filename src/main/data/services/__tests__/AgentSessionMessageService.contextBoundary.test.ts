@@ -56,6 +56,11 @@ describe('agent session context boundary', () => {
     expect(agentSessionMessageService.getNativeSessionId(SESSION)).toBe('new-native')
   })
 
+  it('does not stack a second divider on the first', () => {
+    const first = agentSessionMessageService.insertContextBoundary(SESSION)
+    expect(agentSessionMessageService.insertContextBoundary(SESSION).id).toBe(first.id)
+  })
+
   it('restores the old transcript when the divider row is removed', async () => {
     const boundary = agentSessionMessageService.insertContextBoundary(SESSION)
     await dbh.db.delete(agentSessionMessageTable).where(eq(agentSessionMessageTable.id, boundary.id))

@@ -321,6 +321,11 @@ export const aiRequestSchemas = {
     input: z.strictObject({ topicId: z.string().min(1), mode: z.enum(['divider', 'delete']) }),
     output: z.strictObject({ deletedIds: z.array(z.string()) })
   }),
+  /** Undo toast: remove a divider that a clear just inserted. */
+  'ai.conversation.undo_clear': defineRoute({
+    input: z.strictObject({ topicId: z.string().min(1), boundaryMessageId: z.string().min(1) }),
+    output: z.void()
+  }),
 
   // ── Tool calls: deferred results + approval decisions. Spans two owners
   // (AiStreamManager holds the live output, AiService applies the decision) —
@@ -525,6 +530,8 @@ export type AiEventSchemas = {
   'ai.claude_code.binary.changed': ClaudeCodeBinaryStatus
   /** The model asked to delete the conversation (clear_conversation, mode delete); the user must confirm. */
   'ai.conversation.clear_requested': { topicId: string; reason: string }
+  /** A divider was inserted without a click (model tool, or an agent-session clear); the renderer offers Undo. */
+  'ai.conversation.cleared': { topicId: string; boundaryMessageId: string }
   'ai.agent.attachment_selections.changed': { sessionId: string }
   'ai.stream.chunk': StreamChunkPayload
   'ai.stream.done': StreamDonePayload

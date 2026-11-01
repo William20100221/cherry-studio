@@ -1662,6 +1662,20 @@ const ChatComposerInner = ({
       if (done) void continueQueueAfterClear()
     })
   })
+  useIpcOn('ai.conversation.cleared', ({ topicId: clearedTopicId, boundaryMessageId }) => {
+    if (clearedTopicId !== topicId || !isActiveTab) return
+    toast.info({
+      title: t('chat.message.context_cleared.toast'),
+      timeout: 10_000,
+      action: {
+        label: t('chat.message.context_cleared.undo'),
+        onClick: () =>
+          ipcApi
+            .request('ai.conversation.undo_clear', { topicId: clearedTopicId, boundaryMessageId })
+            .catch((error) => logger.warn('Failed to undo clear', { error }))
+      }
+    })
+  })
 
   const queuedFollowupModelsDataEnabled = queuedFollowups.some(
     (item) => (item.payload.mentionedModels?.length ?? 0) > 0

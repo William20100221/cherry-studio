@@ -1507,6 +1507,27 @@ describe('ChatComposer', () => {
     expect(ipcRequestMock).not.toHaveBeenCalledWith('ai.conversation.clear', expect.anything())
   })
 
+  it('offers Undo after an assistant-made clear and removes the divider through main', async () => {
+    render(<ChatComposer topic={topic} onSend={vi.fn()} />)
+
+    act(() => {
+      mocks.eventListeners.get('ai.conversation.cleared')?.({ topicId: topic.id, boundaryMessageId: 'divider-1' })
+    })
+
+    expect(toast.info).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'chat.message.context_cleared.toast', action: expect.anything() })
+    )
+    const { action } = vi.mocked(toast.info).mock.calls[0][0] as any
+    ipcRequestMock.mockResolvedValueOnce(undefined)
+    await act(async () => {
+      await action.onClick()
+    })
+    expect(ipcRequestMock).toHaveBeenCalledWith('ai.conversation.undo_clear', {
+      topicId: topic.id,
+      boundaryMessageId: 'divider-1'
+    })
+  })
+
   it('asks before a delete the model requested, quoting its reason', async () => {
     ipcRequestMock.mockResolvedValueOnce({ deletedIds: ['m1'] })
     render(<ChatComposer topic={topic} onSend={vi.fn()} />)

@@ -15,7 +15,7 @@ import { buildAgentSessionTopicId } from '@main/ai/agentSession/topic'
 import { findPersistedToolOutput } from '@main/ai/messages/persistedToolOutput'
 import { AgentSessionForkError } from '@main/ai/runtime/fork'
 import { AiStreamAdmissionError, type MainDispatchRequest, WebContentsListener } from '@main/ai/streamManager'
-import { clearConversationNow } from '@main/ai/tools/clearConversation'
+import { clearConversationNow, undoClear } from '@main/ai/tools/clearConversation'
 import { openRequestPath } from '@main/services/file'
 import { PathStaleVersionError } from '@main/utils/file'
 import { isAgentSessionForkFailureReason } from '@shared/ai/agentSessionFork'
@@ -157,6 +157,7 @@ export const aiHandlers: IpcHandlersFor<typeof aiRequestSchemas> = {
     await application.get('AiStreamManager').abortAndDrain(topicId, 'user-requested')
   },
   'ai.conversation.clear': ({ topicId, mode }) => clearConversationNow(topicId, mode),
+  'ai.conversation.undo_clear': async ({ topicId, boundaryMessageId }) => undoClear(topicId, boundaryMessageId),
 
   // ── Tool calls — deferred output lookup + approval decisions. ──
   'ai.tool.get_result': async ({ topicId, messageId, toolCallId }) => {
